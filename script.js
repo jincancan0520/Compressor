@@ -123,17 +123,7 @@ qualitySlider.addEventListener('input', async (e) => {
 
 // 添加常量
 const PRICE_PER_IMAGE = 0.1;
-let paymentConfirmed = false;
-
-// 添加关闭按钮处理函数
-function closeHandler() {
-    const paymentModal = document.getElementById('paymentModal');
-    if (paymentModal) {
-        paymentModal.classList.add('hidden');
-        // 移除模态框
-        document.body.removeChild(paymentModal);
-    }
-}
+let paymentCheckInterval = null;
 
 // 创建付款弹窗
 function createPaymentModal() {
@@ -141,12 +131,25 @@ function createPaymentModal() {
     modal.className = 'modal';
     modal.id = 'paymentModal';
     
+    // 添加时间戳防止缓存
+    const timestamp = new Date().getTime();
+    
     modal.innerHTML = `
         <div class="modal-content">
             <button class="close">×</button>
             <h3>支付提示</h3>
             <div class="payment-info">
-                需要支付 <span class="payment-amount">0</span> 元
+                <div class="amount-display">
+                    应付金额：<span class="payment-amount">0</span> 元
+                </div>
+                <div class="payment-notice" style="color: #ff4d4f; margin: 10px 0; font-size: 14px;">
+                    ⚠️ 请务必支付正确金额，否则可能无法完成下载
+                </div>
+            </div>
+            <div class="payment-steps" style="text-align: left; margin: 15px 0; font-size: 14px;">
+                <p>1. 请使用微信/支付宝扫描下方二维码</p>
+                <p>2. <strong>输入金额：<span class="payment-amount">0</span> 元</strong></p>
+                <p>3. 完成支付后点击下方验证按钮</p>
             </div>
             <div class="payment-tabs">
                 <button class="payment-tab active" data-type="wechat">微信支付</button>
@@ -154,14 +157,17 @@ function createPaymentModal() {
             </div>
             <div class="payment-qrcodes">
                 <div class="qrcode-container active" id="wechatQR">
-                    <img src="wechat-qr.jpg" alt="微信支付">
+                    <img src="wechat-qr.JPG?t=${timestamp}" alt="微信支付">
                 </div>
                 <div class="qrcode-container" id="alipayQR">
-                    <img src="alipay-qr.jpg" alt="支付宝">
+                    <img src="alipay-qr.JPG?t=${timestamp}" alt="支付宝">
                 </div>
             </div>
-            <button class="confirm-payment-btn">完成支付</button>
-            <div class="payment-tip">支付完成后点击上方按钮下载图片</div>
+            <div class="amount-verify" style="margin: 15px 0; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                <input type="number" step="0.01" placeholder="请输入实际支付金额" style="width: 150px; padding: 5px; margin-right: 10px;">
+                <button class="verify-amount-btn" style="padding: 5px 10px;">验证支付</button>
+            </div>
+            <div class="payment-tip" style="color: #666; font-size: 13px;">请确保支付金额正确，并在支付完成后进行验证</div>
         </div>
     `;
     
@@ -183,16 +189,14 @@ downloadButton.addEventListener('click', async () => {
     // 计算需要支付的金额
     const imageCount = imageItems.length || 1;
     const amount = (imageCount * PRICE_PER_IMAGE).toFixed(2);
-
-    // 重置支付状态
-    paymentConfirmed = false;
     
     // 创建并显示支付弹窗
     const paymentModal = createPaymentModal();
     document.body.appendChild(paymentModal);
     
-    // 更新支付金额
-    paymentModal.querySelector('.payment-amount').textContent = amount;
+    // 更新所有显示金额的地方
+    const amountElements = paymentModal.querySelectorAll('.payment-amount');
+    amountElements.forEach(el => el.textContent = amount);
     
     // 绑定关闭按钮事件
     const closeBtn = paymentModal.querySelector('.close');
@@ -200,12 +204,27 @@ downloadButton.addEventListener('click', async () => {
         paymentModal.remove();
     });
     
-    // 绑定确认支付按钮事件
-    const confirmBtn = paymentModal.querySelector('.confirm-payment-btn');
-    confirmBtn.addEventListener('click', () => {
-        paymentConfirmed = true;
-        paymentModal.remove();
-        handleDownload();
+    // 绑定金额验证事件
+    const verifyBtn = paymentModal.querySelector('.verify-amount-btn');
+    const amountInput = paymentModal.querySelector('.amount-verify input');
+    
+    verifyBtn.addEventListener('click', () => {
+        const expectedAmount = parseFloat(amount);
+        const paidAmount = parseFloat(amountInput.value);
+        
+        if (isNaN(paidAmount)) {
+            alert('请输入有效的支付金额');
+            return;
+        }
+        
+        // 允许支付金额大于等于所需金额，或者误差在0.01元以内
+        if (paidAmount >= expectedAmount || Math.abs(paidAmount - expectedAmount) < 0.01) {
+            paymentModal.remove();
+            handleDownload();
+        } else {
+            alert('支付金额不正确，请确认后重试');
+            amountInput.value = '';
+        }
     });
     
     // 支付方式切换事件
@@ -224,11 +243,6 @@ downloadButton.addEventListener('click', async () => {
 
 // 抽取下载逻辑为单独的函数
 async function handleDownload() {
-    if (!paymentConfirmed) {
-        alert('请先完成支付');
-        return;
-    }
-
     const imageItems = document.querySelectorAll('.image-item');
     if (imageItems.length === 0) {
         const link = document.createElement('a');
@@ -254,115 +268,105 @@ async function handleDownload() {
     }
 }
 
-// 更新下载按钮的文本，反映实际功能
-function updateDownloadButtonText() {
-    const imageItems = document.querySelectorAll('.image-item');
-    const downloadButton = document.getElementById('downloadButton');
-    if (imageItems.length > 1) {
-        downloadButton.innerHTML = `
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 19V5M12 19L7 14M12 19L17 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            下载所有压缩图片 (${imageItems.length}张)
-        `;
-    } else {
-        downloadButton.innerHTML = `
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 19V5M12 19L7 14M12 19L17 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            下载压缩图片
-        `;
-    }
-}
-
 // 修改多图片处理函数中的相关部分
 async function handleMultipleImages(files) {
     const imagesList = document.getElementById('imagesList');
-    imagesList.innerHTML = ''; // 清空之前的图片列表
     
-    // 创建一个加载所有图片的Promise数组
-    const imagePromises = files.map((file, index) => {
-        return new Promise((resolve) => {
-            const imageItem = document.createElement('div');
-            imageItem.className = 'image-item';
-            // 如果是第一张图片，添加选中状态
-            if (index === 0) {
-                imageItem.classList.add('selected');
-            }
+    for (const file of files) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const div = document.createElement('div');
+            div.className = 'image-item';
             
-            // 创建预览容器
-            const originalPreview = document.createElement('img');
-            originalPreview.dataset.filename = file.name;
-            originalPreview.dataset.originalSize = file.size;
+            const img = document.createElement('img');
+            img.src = e.target.result;
+            img.dataset.originalSize = file.size;
+            img.dataset.filename = file.name;
             
-            // 添加点击事件处理
-            imageItem.addEventListener('click', () => {
-                // 移除其他图片项的选中状态
-                document.querySelectorAll('.image-item').forEach(item => {
-                    item.classList.remove('selected');
-                });
-                // 添加当前图片的选中状态
-                imageItem.classList.add('selected');
-                // 更新预览区域
-                handlePreviewImage(file);
-            });
-
             const info = document.createElement('div');
             info.className = 'info';
-            const downloadBtn = document.createElement('button');
-            downloadBtn.className = 'download-btn';
-            downloadBtn.disabled = true;
-            downloadBtn.innerHTML = '下载压缩图片';
             
-            imageItem.appendChild(originalPreview);
-            imageItem.appendChild(info);
-            imageItem.appendChild(downloadBtn);
-            imagesList.appendChild(imageItem);
-            
-            // 读取并显示图片
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                originalPreview.src = e.target.result;
-                originalPreview.dataset.originalSize = file.size;
-                originalPreview.onload = async () => {
-                    info.innerHTML = `
-                        <span>原始大小: ${formatFileSize(file.size)}</span>
-                        <span>压缩质量: ${qualitySlider.value}%</span>
-                    `;
+            // 等待图片加载完成后再压缩
+            img.onload = async () => {
+                const compressed = await compressImage(img);
+                const originalSizeKB = (file.size / 1024).toFixed(2);
+                const compressedSizeKB = (compressed.size / 1024).toFixed(2);
+                const compressionRatio = (compressed.size / file.size * 100).toFixed(0);
+                
+                info.innerHTML = `
+                    <span>原始大小: ${originalSizeKB} KB</span><br>
+                    <span>压缩质量: ${qualitySlider.value}%</span><br>
+                    <span>压缩后: ${compressedSizeKB} KB</span>
+                `;
+                
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'download-btn';
+                downloadBtn.textContent = '下载压缩图片';
+                downloadBtn.onclick = async () => {
+                    // 计算需要支付的金额（每张图片0.1元）
+                    const amount = PRICE_PER_IMAGE.toFixed(2);
                     
-                    try {
-                        const compressed = await compressImage(originalPreview);
-                        info.innerHTML += `<span>压缩后: ${formatFileSize(compressed.size)}</span>`;
+                    // 创建并显示支付弹窗
+                    const paymentModal = createPaymentModal();
+                    document.body.appendChild(paymentModal);
+                    
+                    // 更新所有显示金额的地方
+                    const amountElements = paymentModal.querySelectorAll('.payment-amount');
+                    amountElements.forEach(el => el.textContent = amount);
+                    
+                    // 绑定关闭按钮事件
+                    const closeBtn = paymentModal.querySelector('.close');
+                    closeBtn.addEventListener('click', () => {
+                        paymentModal.remove();
+                    });
+                    
+                    // 绑定金额验证事件
+                    const verifyBtn = paymentModal.querySelector('.verify-amount-btn');
+                    const amountInput = paymentModal.querySelector('.amount-verify input');
+                    
+                    verifyBtn.addEventListener('click', () => {
+                        const expectedAmount = parseFloat(amount);
+                        const paidAmount = parseFloat(amountInput.value);
                         
-                        downloadBtn.disabled = false;
-                        downloadBtn.onclick = () => {
+                        if (isNaN(paidAmount)) {
+                            alert('请输入有效的支付金额');
+                            return;
+                        }
+                        
+                        // 允许支付金额大于等于所需金额，或者误差在0.01元以内
+                        if (paidAmount >= expectedAmount || Math.abs(paidAmount - expectedAmount) < 0.01) {
+                            paymentModal.remove();
+                            // 下载当前图片
                             const link = document.createElement('a');
                             link.download = `compressed-${file.name}`;
                             link.href = compressed.url;
                             link.click();
-                            // 清理URL对象
-                            URL.revokeObjectURL(compressed.url);
-                        };
-                        
-                        resolve();
-                    } catch (error) {
-                        console.error('压缩图片失败:', error);
-                        info.innerHTML += `<span style="color: red;">压缩失败</span>`;
-                        resolve();
-                    }
+                        } else {
+                            alert('支付金额不正确，请确认后重试');
+                            amountInput.value = '';
+                        }
+                    });
+                    
+                    // 支付方式切换事件
+                    const paymentTabs = paymentModal.querySelectorAll('.payment-tab');
+                    paymentTabs.forEach(tab => {
+                        tab.addEventListener('click', () => {
+                            paymentTabs.forEach(t => t.classList.remove('active'));
+                            tab.classList.add('active');
+                            const type = tab.dataset.type;
+                            paymentModal.querySelectorAll('.qrcode-container').forEach(qr => qr.classList.remove('active'));
+                            paymentModal.querySelector(`#${type}QR`).classList.add('active');
+                        });
+                    });
                 };
+                
+                div.appendChild(img);
+                div.appendChild(info);
+                div.appendChild(downloadBtn);
+                imagesList.appendChild(div);
             };
-            reader.readAsDataURL(file);
-        });
-    });
-    
-    // 等待所有图片处理完成
-    try {
-        await Promise.all(imagePromises);
-        console.log('所有图片处理完成');
-        updateDownloadButtonText();
-    } catch (error) {
-        console.error('处理图片时发生错误:', error);
+        };
+        reader.readAsDataURL(file);
     }
 }
 
